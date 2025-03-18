@@ -6,4 +6,4 @@ read and see and hear more over on [this info page](https://edwardsharp.github.i
 
 [toidz/toidz-coffin-rev5.stl](toidz/toidz-coffin-rev5.stl)
 
-[toidz/toidz-coffin-rev5.html](toidz/toidz-coffin-rev5.html)
+[toidz/toidz-coffin.html](toidz/toidz-coffin.html)
