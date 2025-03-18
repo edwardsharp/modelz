@@ -10,18 +10,18 @@ so these are some taller/bigger/better(imho) buttons for the [westlicht performe
 
 [performer_button_rev3.stl](performer_button_rev3.stl) print 32 of these
 
-[performer_button_rev3.html](performer-bttnz/performer_button_rev3.html)
+[performer_button_rev3.html](performer_button_rev3.html)
 
 
 ![performer_fn_button](performer_fn_button.png "rectangle function button")
 
 [performer_fn_button.stl](performer_fn_button.stl) print 5 of these
 
-[performer_fn_button.html](performer-bttnz/performer_fn_button.html) 3d render
+[performer_fn_button.html](performer_fn_button.html) 3d render
 
 
 ![8mm_hex](8mm_hex.png "knurly!")
 
 [8mm_hex.stl](8mm_hex.stl) optionally, print 1 of these to make taking the small nutz off all the 3.5mm jackz _way_ easier. NOTE: before print, scale this 5-10% bigger for better tolerence/fit.
 
-[8mm_hex.html](performer-bttnz/8mm_hex.html) 3d render
+[8mm_hex.html](8mm_hex.html) 3d render
