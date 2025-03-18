@@ -1,4 +1,4 @@
-# M O D E L Z
+# hello 3d printer
 
 a collection of artifacts from my semi-charmed 3d printing life
 
