@@ -7,6 +7,7 @@ a collection of artifacts from my semi-charmed 3d printing life.
 * [toidz](toidz/) toidz coffin _see also:_ [info page](https://edwardsharp.github.io/toidz/bno08xviz/)
 * [coffin-button ⚰️+🔘](coffin-button/) needed a button for my winter coat.
 * [cord-comb 🔌🪮](cord-comb/) a little holder for 3.5mm patch cablez, slides onto the end edge of my modular case.
+* [pinkweather ⛈️](pinkweather/) yet another weather display for e-ink;
 
 ---
 
