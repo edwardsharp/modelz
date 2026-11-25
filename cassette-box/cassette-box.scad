@@ -48,8 +48,6 @@ lip_interference = 0.35; // [0.05:0.05:0.6]
 // retention lip on the two narrow end edges; these take the strain since the
 // hinge already restrains the opposite long edge.
 lip_interference_side = 0.6; // [0.1:0.05:0.9]
-pull_tab_enabled = false;
-pull_extension = 3;
 
 /* [single rectangular hub lock] */
 hub_lock_enabled = true;
@@ -60,9 +58,7 @@ hub_lock_height = 8; // [4:0.2:10]
 hub_lock_tip_chamfer = 0.6; // [0:0.1:1]
 // zero degrees puts the long side parallel to the cassette's long edge.
 hub_lock_angle = 90; // [0:5:175]
-// provisional measurements from the cassette's left and non-tape edges.
-// hub_lock_y was measured on a physical print/cassette to a position that
-// works with the cassette inserted either direction.
+// trial position from the cassette's left and non-tape edges; check both orientations.
 hub_lock_x = 29; // [24:0.1:34]
 hub_lock_y = 28; // [25:0.1:36]
 
@@ -72,9 +68,33 @@ text_font = "Liberation Sans:style=Bold";
 // engraving depth or raised height, measured from the exterior surface.
 text_relief = 0.4; // [0.2:0.2:1]
 
+/* [texture pattern] */
+// minimum gap between shapes; spare space is distributed evenly.
+texture_gap = 2; // [0.4:0.2:10]
+// minimum border; panel patterns also stay clear of walls and rounded corners.
+texture_margin = 3; // [1:0.5:10]
+// engraving depth or raised height; through cuts ignore this setting.
+texture_relief = 0.4; // [0.2:0.2:1]
+
+/* [front texture - lid] */
+front_texture_shape = "off"; // [off, circle, square, hexagon]
+front_texture_mode = "engraved"; // [engraved, raised, through]
+// maximum width of one shape in millimeters.
+front_texture_size = 6; // [1:0.5:30]
+
+/* [back texture - base] */
+back_texture_shape = "off"; // [off, circle, square, hexagon]
+back_texture_mode = "engraved"; // [engraved, raised, through]
+back_texture_size = 6; // [1:0.5:30]
+
+/* [spine texture] */
+spine_texture_shape = "off"; // [off, circle, square, hexagon]
+spine_texture_mode = "engraved"; // [engraved, raised, through]
+spine_texture_size = 3; // [1:0.5:10]
+
 /* [front lettering - lid] */
 front_text = "";
-front_text_mode = "engraved"; // [engraved, raised, off]
+front_text_mode = "engraved"; // [engraved, raised, through, off]
 // font size in millimeters.
 front_text_size = 8; // [2:0.5:18]
 front_text_rotation = 0; // [0:90:270]
@@ -83,7 +103,7 @@ front_text_y = 0; // [-25:0.5:25]
 
 /* [back lettering - base] */
 back_text = "";
-back_text_mode = "engraved"; // [engraved, raised, off]
+back_text_mode = "engraved"; // [engraved, raised, through, off]
 // font size in millimeters.
 back_text_size = 8; // [2:0.5:18]
 back_text_rotation = 0; // [0:90:270]
@@ -94,7 +114,7 @@ back_text_y = 0; // [-25:0.5:25]
 spine_text = "";
 // optional right-hand label; when set, the main spine label moves to the left.
 spine_text_right = "";
-spine_text_mode = "engraved"; // [engraved, raised, off]
+spine_text_mode = "engraved"; // [engraved, raised, through, off]
 // font size in millimeters.
 spine_text_size = 4; // [2:0.5:12]
 spine_text_rotation = 0; // [0:90:270]
@@ -117,7 +137,6 @@ fold_span = 2 * hinge_length + spine_length;
 hinge_width = w - 2 * hinge_end_inset;
 skirt_outer = skirt_clearance + skirt_thickness;
 skirt_outer_side = skirt_clearance_side + skirt_thickness;
-pull_projection = pull_tab_enabled ? pull_extension : 0;
 lip_half_height = lip_height / 2;
 lip_z = panel + skirt_depth - 1;
 groove_z = closed_height - lip_z;
@@ -154,8 +173,6 @@ assert(skirt_depth > 1 + lip_half_height + 0.15 &&
        groove_z - lip_half_height - 0.15 > panel &&
        groove_z + lip_half_height + 0.15 < wall_top,
        "lip_height must fit within the skirt and base walls.");
-assert(!pull_tab_enabled || pull_extension > 0,
-       "enabled pull tab must have a positive extension.");
 assert(!hub_lock_enabled ||
        (min(hub_lock_span, hub_lock_thickness, hub_lock_height) > 0 &&
         hub_lock_height < cassette_thickness &&
@@ -169,9 +186,9 @@ assert(!hub_lock_enabled ||
        "keep the lock inside the cassette; chamfer must leave a positive tip.");
 
 echo(print_footprint = [w + 2 * skirt_outer_side,
-     2 * d + fold_span + skirt_outer + pull_projection],
+     2 * d + fold_span + skirt_outer],
      nominal_closed_size = [w + 2 * skirt_outer_side,
-     d + skirt_outer + pull_projection + bend_r + neutral_z, closed_height],
+     d + skirt_outer + bend_r + neutral_z, closed_height],
      hinge_radius = bend_r, straight_spine = spine_length);
 
 // extrude a Y/Z profile along X without changing its handedness.
@@ -203,10 +220,46 @@ module round_outer_corner(cx, cy, sx, sy, r, z0, z1) {
             }
 }
 
-module exterior_label(value, mode, size, angle, offset_x, offset_y,
-                      face_depth, flip_y = true, right_value = "") {
-    assert(mode == "engraved" || mode == "raised" || mode == "off",
-           "text mode must be engraved, raised, or off.");
+module exterior_relief(mode, relief) {
+    cut_depth = max(text_relief, texture_relief);
+    translate([0, 0, mode == "raised" ? -relief : mode == "through" ? -cut_depth - eps : -eps])
+        linear_extrude(height = mode == "through" ? panel + cut_depth + 2 * eps : relief + eps)
+            children();
+}
+
+module hub_attachment_mask() {
+    translate([wall + clearance_xy + hub_lock_x - lock_half_x - 1,
+               wall + clearance_xy + hub_lock_y - lock_half_y - 1])
+        square([2 * lock_half_x + 2, 2 * lock_half_y + 2]);
+}
+
+module exterior_face(value, mode, size, angle, offset_x, offset_y,
+                     face_depth, texture_shape, texture_mode, texture_size,
+                     flip_y = true, right_value = "", protect_hub = false) {
+    assert(mode == "engraved" || mode == "raised" || mode == "through" || mode == "off",
+           "text mode must be engraved, raised, through, or off.");
+    assert(texture_shape == "off" || texture_shape == "circle" ||
+           texture_shape == "square" || texture_shape == "hexagon",
+           "texture shape must be off, circle, square, or hexagon.");
+    assert(texture_mode == "engraved" || texture_mode == "raised" || texture_mode == "through",
+           "texture mode must be engraved, raised, or through.");
+    has_text = (value != "" || right_value != "") && mode != "off";
+    has_texture = texture_shape != "off";
+    border = face_depth == spine_length ? texture_margin : max(texture_margin, wall + corner_radius);
+    shape_height = texture_shape == "hexagon" ? texture_size * sqrt(3) / 2 : texture_size;
+    usable_width = w - 2 * border;
+    usable_depth = face_depth - 2 * border;
+    if (has_texture) {
+        assert(texture_size > 0 && texture_gap > 0 && texture_margin >= 1 &&
+               texture_relief > 0,
+               "texture needs positive size, gap and relief, and at least a 1 mm border.");
+        assert(texture_size <= usable_width && shape_height <= usable_depth,
+               "texture shape does not fit its face; reduce its size or the border.");
+        assert(texture_mode != "engraved" || panel - texture_relief >= 0.4 - 0.000001,
+               "texture engraving must leave at least 0.4 mm of panel thickness.");
+        if (texture_mode == "raised")
+            echo("WARNING: raised exterior texture projects below the flat print; review bed contact and supports.");
+    }
     if ((value != "" || right_value != "") && mode != "off") {
         assert(size > 0 && text_relief > 0 && w > 2 && face_depth > 2,
                "lettering needs positive size, relief and usable face area.");
@@ -222,36 +275,65 @@ module exterior_label(value, mode, size, angle, offset_x, offset_y,
     difference() {
         union() {
             children();
-            if ((value != "" || right_value != "") && mode == "raised")
-                label_shape(true);
+            if (has_text && mode == "raised")
+                exterior_relief(mode, text_relief) label_shape();
+            if (has_texture && texture_mode == "raised")
+                exterior_relief(texture_mode, texture_relief) pattern_shape();
         }
-        if ((value != "" || right_value != "") && mode == "engraved")
-            label_shape(false);
+        if (has_text && (mode == "engraved" || mode == "through"))
+            exterior_relief(mode, text_relief)
+                difference() {
+                    label_shape();
+                    if (protect_hub && hub_lock_enabled && mode == "through")
+                        hub_attachment_mask();
+                }
+        if (has_texture && (texture_mode == "engraved" || texture_mode == "through"))
+            exterior_relief(texture_mode, texture_relief) pattern_shape();
     }
 
-    module label_shape(raised) {
-        translate([0, 0, raised ? -text_relief : -eps])
-            linear_extrude(height = text_relief + eps)
-                intersection() {
-                    translate([1, 1]) square([w - 2, face_depth - 2]);
-                    translate([w / 2, face_depth / 2])
-                        // compensate for viewing the outside of each folded face.
-                        scale([1, flip_y ? -1 : 1])
-                            translate([offset_x, offset_y])
-                                rotate(angle) {
-                                    if (right_value == "")
-                                        text(value, size = size, font = text_font,
-                                             halign = "center", valign = "center");
-                                    else {
-                                        translate([-w / 2 + 1, 0])
-                                            text(value, size = size, font = text_font,
-                                                 halign = "left", valign = "center");
-                                        translate([w / 2 - 1, 0])
-                                            text(right_value, size = size, font = text_font,
-                                                 halign = "right", valign = "center");
-                                    }
-                                }
-                }
+    module label_shape() {
+        intersection() {
+            translate([1, 1]) square([w - 2, face_depth - 2]);
+            translate([w / 2, face_depth / 2])
+                // compensate for viewing the outside of each folded face.
+                scale([1, flip_y ? -1 : 1])
+                    translate([offset_x, offset_y])
+                        rotate(angle) {
+                            if (right_value == "")
+                                text(value, size = size, font = text_font,
+                                     halign = "center", valign = "center");
+                            else {
+                                translate([-w / 2 + 1, 0])
+                                    text(value, size = size, font = text_font,
+                                         halign = "left", valign = "center");
+                                translate([w / 2 - 1, 0])
+                                    text(right_value, size = size, font = text_font,
+                                         halign = "right", valign = "center");
+                            }
+                        }
+        }
+    }
+
+    module pattern_shape() {
+        columns = floor((usable_width + texture_gap) / (texture_size + texture_gap));
+        rows = floor((usable_depth + texture_gap) / (shape_height + texture_gap));
+        step_x = columns > 1 ? (usable_width - texture_size) / (columns - 1) : 0;
+        step_y = rows > 1 ? (usable_depth - shape_height) / (rows - 1) : 0;
+        echo(texture = texture_shape, grid = [columns, rows], face_depth = face_depth);
+        for (i = [0 : columns - 1], j = [0 : rows - 1])
+            let(x = columns == 1 ? w / 2 : border + texture_size / 2 + i * step_x,
+                y = rows == 1 ? face_depth / 2 : border + shape_height / 2 + j * step_y,
+                hub_x = wall + clearance_xy + hub_lock_x,
+                hub_y = wall + clearance_xy + hub_lock_y,
+                overlaps_hub = abs(x - hub_x) < texture_size / 2 + lock_half_x + 1 &&
+                               abs(y - hub_y) < shape_height / 2 + lock_half_y + 1)
+                // Skip whole shapes rather than clipping them around the lock attachment.
+                if (!(protect_hub && hub_lock_enabled && texture_mode == "through" && overlaps_hub))
+                    translate([x, y])
+                        if (texture_shape == "square")
+                            square(texture_size, center = true);
+                        else
+                            circle(d = texture_size, $fn = texture_shape == "hexagon" ? 6 : 64);
     }
 }
 
@@ -317,8 +399,10 @@ module base_shell() {
 
 module base() {
     difference() {
-        exterior_label(back_text, back_text_mode, back_text_size,
-                       back_text_rotation, back_text_x, back_text_y, d)
+        exterior_face(back_text, back_text_mode, back_text_size,
+                      back_text_rotation, back_text_x, back_text_y, d,
+                      back_texture_shape, back_texture_mode, back_texture_size,
+                      protect_hub = true)
             base_shell();
         round_outer_corner(w, d, -1, -1, corner_radius, 0, wall_top);
         round_outer_corner(0, d, 1, -1, corner_radius, 0, wall_top);
@@ -326,9 +410,10 @@ module base() {
 }
 
 module spine() {
-    exterior_label(spine_text, spine_text_mode, spine_text_size,
-                   spine_text_rotation, spine_text_x, spine_text_y, spine_length,
-                   true, spine_text_right)
+    exterior_face(spine_text, spine_text_mode, spine_text_size,
+                  spine_text_rotation, spine_text_x, spine_text_y, spine_length,
+                  spine_texture_shape, spine_texture_mode, spine_texture_size,
+                  true, spine_text_right)
         cube([w, spine_length, panel]);
 }
 
@@ -362,15 +447,13 @@ module lid_shell() {
     translate([-skirt_outer_side, d + skirt_clearance, panel - eps])
         cube([w + 2 * skirt_outer_side, skirt_thickness, skirt_depth + eps]);
     perimeter_lip();
-    if (pull_tab_enabled)
-        translate([-skirt_outer_side, d + skirt_outer - eps, 0])
-            cube([w + 2 * skirt_outer_side, pull_extension + eps, panel]);
 }
 
 module lid() {
     difference() {
-        exterior_label(front_text, front_text_mode, front_text_size,
-                       front_text_rotation, front_text_x, front_text_y, d, false)
+        exterior_face(front_text, front_text_mode, front_text_size,
+                      front_text_rotation, front_text_x, front_text_y, d,
+                      front_texture_shape, front_texture_mode, front_texture_size, false)
             lid_shell();
         round_outer_corner(-skirt_outer_side, d + skirt_outer, 1, -1,
                             corner_radius, 0, panel + skirt_depth);
@@ -437,12 +520,13 @@ module closed_case() {
 }
 
 module hinge_test(closed = true) {
-    rear = closed ? -bend_r - neutral_z - text_relief - eps : -fold_span - 18;
+    relief = max(text_relief, texture_relief);
+    rear = closed ? -bend_r - neutral_z - relief - eps : -fold_span - 18;
     intersection() {
         if (closed) closed_case();
         else flat_case();
-        translate([-skirt_outer_side, rear, -text_relief - eps])
-            cube([24, 18 - rear, closed_height + 2 * text_relief + 2 * eps]);
+        translate([-skirt_outer_side, rear, -relief - eps])
+            cube([24, 18 - rear, closed_height + 2 * relief + 2 * eps]);
     }
 }
 
