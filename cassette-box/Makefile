@@ -1,4 +1,4 @@
-OPENSCAD ?= openscad
+OPENSCAD ?= /Applications/OpenSCAD-2021.01.app/Contents/MacOS/OpenSCAD
 SHELL := /bin/bash
 CAMERA = 0,0,0,65,0,25,180
 

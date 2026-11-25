@@ -16,6 +16,10 @@ clearance_z = 0.8;
 panel = 1.2;
 wall = 1.2;
 closure_gap = 0.25;
+// outer radius for the 2 corners away from the hinge; the 2 corners nearest
+// the hinge stay square so the hinge still meets a flush straight edge.
+// kept modest relative to `wall` so the rounded corner doesn't thin out.
+corner_radius = 2; // [0:0.5:6]
 
 /* [living hinges] */
 hinge_thickness = 0.4;
@@ -31,17 +35,19 @@ hinge_taper = 1;
 skirt_thickness = 1.2;
 skirt_depth = 4;
 skirt_clearance = 0.25;
-// tighter fit for the two end skirts only; keeps them from rattling side to
-// side. much snugger than skirt_clearance, but still a positive slip fit -
-// most of the rattle beyond the nominal gap is print-tolerance stack-up, so
-// also check your slicer's horizontal expansion/elephant-foot compensation.
-skirt_clearance_side = 0.05;
+// tighter (slightly interference) fit for the two end skirts only; keeps
+// them from rattling side to side. the hinge itself has some lateral give,
+// so this runs a bit negative rather than just a snug slip fit.
+skirt_clearance_side = -0.45;
 skirt_rear_setback = 4;
+// vertical size of the lip/groove snap feature; shared by both edges so the
+// bump and groove stay easy to feel/see instead of a faint sliver.
+lip_height = 3; // [1:0.25:4]
 // retention lip on the long edge opposite the hinge.
-lip_interference = 0.2; // [0.05:0.05:0.5]
+lip_interference = 0.35; // [0.05:0.05:0.6]
 // retention lip on the two narrow end edges; these take the strain since the
 // hinge already restrains the opposite long edge.
-lip_interference_side = 0.4; // [0.1:0.05:0.8]
+lip_interference_side = 0.6; // [0.1:0.05:0.9]
 pull_tab_enabled = false;
 pull_extension = 3;
 
@@ -55,10 +61,10 @@ hub_lock_tip_chamfer = 0.6; // [0:0.1:1]
 // zero degrees puts the long side parallel to the cassette's long edge.
 hub_lock_angle = 90; // [0:5:175]
 // provisional measurements from the cassette's left and non-tape edges.
-// hub_lock_y is biased away from the hinge edge so the same lock position
+// hub_lock_y was measured on a physical print/cassette to a position that
 // works with the cassette inserted either direction.
 hub_lock_x = 29; // [24:0.1:34]
-hub_lock_y = 33.8; // [25:0.1:36]
+hub_lock_y = 28; // [25:0.1:36]
 
 /* [lettering] */
 // installed font family and style; choose one from OpenSCAD's font list.
@@ -112,8 +118,7 @@ hinge_width = w - 2 * hinge_end_inset;
 skirt_outer = skirt_clearance + skirt_thickness;
 skirt_outer_side = skirt_clearance_side + skirt_thickness;
 pull_projection = pull_tab_enabled ? pull_extension : 0;
-lip_projection = skirt_clearance + lip_interference;
-lip_projection_side = skirt_clearance_side + lip_interference_side;
+lip_half_height = lip_height / 2;
 lip_z = panel + skirt_depth - 1;
 groove_z = closed_height - lip_z;
 rear_extension = max(0, bend_r - (panel - neutral_z) - closure_gap);
@@ -131,6 +136,9 @@ assert(min(cassette_length, cassette_depth, cassette_thickness,
        "shell, cassette, hinge and clearance dimensions must be positive.");
 assert(hinge_thickness < panel && spine_length > panel,
        "hinges must be thinner than panels; reduce hinge_length for this depth.");
+assert(corner_radius >= 0 && corner_radius < min(w, d) / 4 &&
+       corner_radius < d - skirt_rear_setback,
+       "corner_radius must stay small relative to the shell and clear the hinge skirt setback.");
 assert(hinge_end_inset >= wall && hinge_width > 0,
        "hinge_end_inset must reach the side walls (>= wall) with a positive hinge width.");
 assert(hinge_taper >= 0 && 2 * hinge_taper < hinge_length,
@@ -142,10 +150,10 @@ assert(skirt_rear_setback > rear_extension && skirt_rear_setback < d,
 assert(lip_interference > 0 && lip_interference + 0.15 < wall &&
        lip_interference_side > 0 && lip_interference_side + 0.15 < wall,
        "lips need positive interference and material behind their grooves.");
-assert(skirt_depth > 1 + max(lip_projection, lip_projection_side) &&
-       groove_z - max(lip_interference, lip_interference_side) - 0.15 > panel &&
-       groove_z + max(lip_interference, lip_interference_side) + 0.15 < wall_top,
-       "lips and grooves must fit within the skirt and base walls.");
+assert(skirt_depth > 1 + lip_half_height + 0.15 &&
+       groove_z - lip_half_height - 0.15 > panel &&
+       groove_z + lip_half_height + 0.15 < wall_top,
+       "lip_height must fit within the skirt and base walls.");
 assert(!pull_tab_enabled || pull_extension > 0,
        "enabled pull tab must have a positive extension.");
 assert(!hub_lock_enabled ||
@@ -178,6 +186,21 @@ module xz_prism(points, length) {
     translate([0, length, 0])
         rotate([90, 0, 0])
             linear_extrude(height = length) polygon(points);
+}
+
+// subtracts the sharp sliver outside a radius-r quarter circle at corner
+// (cx, cy); (sx, sy) each +-1 and point from the corner into the solid.
+// the cube is padded by eps on every side so none of its corners land
+// exactly on the circle (an exact tangency there causes non-manifold
+// results).
+module round_outer_corner(cx, cy, sx, sy, r, z0, z1) {
+    if (r > 0)
+        translate([cx + min(sx, 0) * r - eps, cy + min(sy, 0) * r - eps, z0])
+            difference() {
+                cube([r + 2 * eps, r + 2 * eps, z1 - z0]);
+                translate([max(sx, 0) * r + eps, max(sy, 0) * r + eps, -eps])
+                    cylinder(r = r, h = z1 - z0 + 2 * eps);
+            }
 }
 
 module exterior_label(value, mode, size, angle, offset_x, offset_y,
@@ -245,18 +268,20 @@ module side_wall() {
 
 module side_groove() {
     // clearance around the seated lip; only the closing motion interferes.
-    reach = lip_interference_side + 0.15;
+    depth = lip_interference_side + 0.15;
+    half_h = lip_half_height + 0.15;
     translate([0, skirt_rear_setback - 0.3, groove_z])
-        xz_prism([[-eps, -reach], [reach, 0], [-eps, reach]],
+        xz_prism([[-eps, -half_h], [depth, 0], [-eps, half_h]],
                  d - skirt_rear_setback + 0.3 + eps);
 }
 
 module perimeter_groove() {
     side_groove();
     translate([w, 0, 0]) mirror([1, 0, 0]) side_groove();
-    reach = lip_interference + 0.15;
+    depth = lip_interference + 0.15;
+    half_h = lip_half_height + 0.15;
     translate([-eps, d, groove_z])
-        yz_prism([[eps, -reach], [-reach, 0], [eps, reach]], w + 2 * eps);
+        yz_prism([[eps, -half_h], [-depth, 0], [eps, half_h]], w + 2 * eps);
 }
 
 module hub_lock() {
@@ -291,9 +316,13 @@ module base_shell() {
 }
 
 module base() {
-    exterior_label(back_text, back_text_mode, back_text_size,
-                   back_text_rotation, back_text_x, back_text_y, d)
-        base_shell();
+    difference() {
+        exterior_label(back_text, back_text_mode, back_text_size,
+                       back_text_rotation, back_text_x, back_text_y, d)
+            base_shell();
+        round_outer_corner(w, d, -1, -1, corner_radius, 0, wall_top);
+        round_outer_corner(0, d, 1, -1, corner_radius, 0, wall_top);
+    }
 }
 
 module spine() {
@@ -306,9 +335,9 @@ module spine() {
 module side_lip() {
     translate([0, skirt_rear_setback, lip_z])
         xz_prism([
-            [-skirt_clearance_side - eps, -lip_projection_side],
+            [-skirt_clearance_side - eps, -lip_half_height],
             [lip_interference_side, 0],
-            [-skirt_clearance_side - eps, lip_projection_side]
+            [-skirt_clearance_side - eps, lip_half_height]
         ], d + skirt_clearance_side - skirt_rear_setback + eps);
 }
 
@@ -317,9 +346,9 @@ module perimeter_lip() {
     translate([w, 0, 0]) mirror([1, 0, 0]) side_lip();
     translate([-skirt_clearance - eps, d, lip_z])
         yz_prism([
-            [skirt_clearance + eps, -lip_projection],
+            [skirt_clearance + eps, -lip_half_height],
             [-lip_interference, 0],
-            [skirt_clearance + eps, lip_projection]
+            [skirt_clearance + eps, lip_half_height]
         ], w + 2 * skirt_clearance + 2 * eps);
 }
 
@@ -339,9 +368,15 @@ module lid_shell() {
 }
 
 module lid() {
-    exterior_label(front_text, front_text_mode, front_text_size,
-                   front_text_rotation, front_text_x, front_text_y, d, false)
-        lid_shell();
+    difference() {
+        exterior_label(front_text, front_text_mode, front_text_size,
+                       front_text_rotation, front_text_x, front_text_y, d, false)
+            lid_shell();
+        round_outer_corner(-skirt_outer_side, d + skirt_outer, 1, -1,
+                            corner_radius, 0, panel + skirt_depth);
+        round_outer_corner(w + skirt_outer_side, d + skirt_outer, -1, -1,
+                            corner_radius, 0, panel + skirt_depth);
+    }
 }
 
 module flat_web(y) {
